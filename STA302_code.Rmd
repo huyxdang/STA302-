@@ -1,0 +1,399 @@
+---
+title: "EPL STA302 GOOD"
+author: "Huy Dang"
+date: "2024-08-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#installing packages that may be used
+# install.packages("MASS")
+# install.packages("gapminder")
+# install.packages("leaps")
+# install.packages("raster")
+# install.packages("terra")
+#install.packages("usdm")
+install.packages("car")
+install.packages("caret")
+# install.packages("corrplot")
+# install.packages("texreg")
+# install.packages("MPV")
+install.packages("faraway")
+# install.packages("lmtest")
+# install.packages("nortest")
+# install.packages("scipy.stats")
+# install.packages("sandwich")
+install.packages("glmnet")
+
+```
+
+```{r}
+#making sure the packages are ready to use
+library(dplyr)
+library(gapminder)
+library(leaps)
+library(glmnet)
+library(ggplot2)
+library(MASS)
+library(car)
+library(corrplot)
+library(texreg)
+library(MPV)
+library(faraway)
+library(lmtest)
+library(nortest)
+library(caret)
+library(glmnet)
+
+```
+
+```{r}
+set.seed(123)  # Set seed for reproducibility
+
+#Assigning the dataset to variable epl
+epl <- read.csv("epl_data.csv")
+
+#Selecting variables of interest and creating a matrix with just those values
+eplFiltered <- epl %>% select_(6, 7, 8, 10, 20, 24, 27, 28, 29, 40, 41, 43, 44, 56, 57, 58, 59)
+head(eplFiltered)
+
+#Removing all NA values, leaves us with 501 observations
+eplWoNa <- na.omit(eplFiltered)
+nrow(eplWoNa)
+
+s <- sum(eplWoNa$Appearances == 0)
+
+eplPos <- eplWoNa[!(eplWoNa$Appearances %in% 0),]
+nrow(eplPos)
+```
+
+```{r}
+#Conducting variable selection using AIC
+
+#Fitting a model using all variables
+modAll <- lm(Appearances ~ Age + Wins + Goals + Hit.woodwork + Tackles + 
+              Blocked.shots + Interceptions + Clearances + Assists + Passes + Big.chances.created +
+              Crosses + Yellow.cards + Red.cards + Fouls + Offsides, data = eplPos)
+#Taking a look at the model
+summary(modAll)
+
+#Checking the value of AIC for the model with all variables
+AIC(modAll)
+
+#Creating an intercept only model
+mod0 <- lm(Appearances ~ 1, data = eplPos)
+AIC(mod0)
+summary(mod0)$r.squared
+```
+
+```{r}
+#Conducting backward elimination on the full model (modAll)
+bmod <- stepAIC(object = modAll, direction = "backward", trace = FALSE)
+coef(bmod)
+
+#Checking the adjusted R-squared after the variable selection (backward)
+summary(bmod)$adj.r.squared
+
+#Conducting forward elimination on the empty model, full model as scope
+fmod <- stepAIC(object = mod0, direction = "forward", scope = formula(modAll), trace = FALSE)
+coef(fmod)
+
+#Checking the adjusted R-squared after the variable selection (forward)
+summary(fmod)$adj.r.squared
+
+#Both methods select the same variables :)
+
+
+#This shows that the AIC decreases with each added variable
+bmod$anova
+fmod$anova
+```
+
+```{r}
+#Partial F-test
+
+#The best model given by both forwards and backwards methods
+optimodel <- lm(Appearances ~ Wins + Fouls + Interceptions + Blocked.shots + 
+                  Offsides + Crosses + Clearances + Goals + Hit.woodwork + 
+                  Age + Tackles, data = eplPos)
+#Second best forward method model
+fSecondBest <- lm(Appearances ~ Wins + Fouls + Interceptions + Blocked.shots + 
+                    Offsides + Crosses + Clearances + Goals + Hit.woodwork + 
+                    Tackles, data = eplPos)
+
+fThirdBest <- lm(Appearances ~ Wins + Fouls + Interceptions + Blocked.shots + 
+                    Offsides + Crosses + Clearances + Goals + Hit.woodwork, data = eplPos)
+
+fFourthBest <- lm(Appearances ~ Wins + Fouls + Interceptions + Blocked.shots + 
+                    Offsides + Crosses + Clearances + Goals, data = eplPos)
+#Second best backward method model
+bSecondBest <- lm(Appearances ~ Age + Wins + Goals + Hit.woodwork + Tackles + Blocked.shots + 
+                    Interceptions + Clearances + Crosses + Yellow.cards + Fouls + 
+                    Offsides, data = eplPos)
+
+#The output gives Pr(>F) = 0.1109, we cannot reject null hypothesis do not keep variable
+anova(optimodel, fSecondBest)
+
+#Cannot reject null hypothesis at 0.05, p-value = 0.0824
+anova(fSecondBest, fThirdBest)
+
+#fThirdBest gives us the best model, the below test give p-value 0.00523
+#We reject null hypothesis that new variable is 0
+anova(fThirdBest, fFourthBest)
+
+#The output gives Pr(>F) = 0.2957, we cannot reject null hypothesis, decide to remove excess variable
+anova(optimodel, bSecondBest)
+
+#The partial F tests above, along with our stepAIC variable selection tell us
+#fThirdBest gives us the best model
+#Between fThirdBest and optimodel, AIC changes by less than 2, not significant
+#Our partial F tests tell us to remove the two variables differing between optimodel and fThirdBest
+#We also like the simplicity of having less covariates :)
+
+optimal <- lm(Appearances ~ Wins + Fouls + Interceptions + Blocked.shots + 
+                    Offsides + Crosses + Clearances + Goals + Hit.woodwork, data = eplPos)
+```
+
+
+```{r}
+#Assumption Checking
+
+
+# Checking residuals for normality
+par(mfrow = c(2, 2))
+
+# Histogram of residuals
+hist(residuals(optimal), main = "Histogram of Residuals", xlab = "Residuals", breaks = 20)
+
+# Q-Q plot of residuals
+qqnorm(residuals(optimal))
+qqline(residuals(optimal), col = "red")
+
+# Residuals vs Fitted plot
+plot(fitted(optimal), residuals(optimal),
+     xlab = "Fitted Values", ylab = "Residuals",
+     main = "Residuals vs Fitted")
+abline(h = 0, col = "red")
+
+# Scale-Location plot
+plot(optimal, which = 3)
+
+# Statistical tests for normality
+shapiro.test(residuals(optimal))
+
+# Checking for homoscedasticity using Breusch-Pagan test
+library(lmtest)
+bptest(optimal)
+
+```
+
+```{r}
+# Extract the covariates (excluding the intercept)
+covariates <- attr(terms(optimal), "term.labels")
+
+# Subset the original dataset to include only these covariates
+epl_subset <- eplPos[, covariates]
+
+# Create a pairwise plot using base R
+pairs(epl_subset, main = "Pairwise Plot of Covariates in the Optimal Model")
+
+```
+
+```{r}
+#Using the pairwise plots, choosing and applying transformations to Appearances and Clearances
+
+optimal_sqrt <- lm(sqrt(Appearances) ~ Wins + Fouls + Interceptions + Blocked.shots + 
+                   Offsides + Crosses + log(Clearances +1) + Goals + Hit.woodwork, data = eplPos)
+
+```
+
+```{r}
+# Checking residuals for normality
+par(mfrow = c(2, 2))
+
+# Histogram of residuals
+hist(residuals(optimal_sqrt), main = "Histogram of Residuals", xlab = "Residuals", breaks = 20)
+
+# Q-Q plot of residuals
+qqnorm(residuals(optimal_sqrt))
+qqline(residuals(optimal_sqrt), col = "red")
+
+# Residuals vs Fitted plot
+plot(fitted(optimal_sqrt), residuals(optimal_sqrt),
+     xlab = "Fitted Values", ylab = "Residuals",
+     main = "Residuals vs Fitted")
+abline(h = 0, col = "red")
+
+# Scale-Location plot
+plot(optimal, which = 3)
+
+# Statistical tests for normality
+shapiro.test(residuals(optimal_sqrt))
+```
+
+```{r}
+# Calculate Cook's Distance
+cooks_d <- cooks.distance(optimal)
+
+# Identify influential points where Cook's distance is greater than a threshold (commonly 4/n)
+influential_points <- which(cooks_d > 4/nrow(eplPos))
+
+# Plot Cooks Distance
+plot(cooks_d, type = "h", main = "Cook's Distance", ylab = "Cook's Distance", xlab = "Observation Index")
+abline(h = 4/nrow(eplPos), col = "red", lty = 2)
+points(influential_points, cooks_d[influential_points], col = "blue", pch = 19)
+
+```
+
+
+```{r}
+eplPos_cleaned <- eplPos[-influential_points, ]
+
+# Refit the linear model using the cleaned dataset
+optimal_cleaned <- lm(Appearances ~ Wins + Fouls + Interceptions + Blocked.shots + 
+                      Offsides + Crosses + Clearances + Goals + Hit.woodwork, data = eplPos_cleaned)
+
+```
+
+```{r}
+# Checking residuals for normality
+par(mfrow = c(2, 2))
+
+# Histogram of residuals
+hist(residuals(optimal_cleaned), main = "Histogram of Residuals", xlab = "Residuals", breaks = 20)
+
+# Q-Q plot of residuals
+qqnorm(residuals(optimal_cleaned))
+qqline(residuals(optimal_cleaned), col = "red")
+
+# Residuals vs Fitted plot
+plot(fitted(optimal_cleaned), residuals(optimal_cleaned),
+     xlab = "Fitted Values", ylab = "Residuals",
+     main = "Residuals vs Fitted")
+abline(h = 0, col = "red")
+
+# Scale-Location plot
+plot(optimal, which = 3)
+
+# Statistical tests for normality
+shapiro.test(residuals(optimal_cleaned))
+```
+
+VIF of the cleaned optimal model
+```{r}
+#vif_factors <-vif(modAll)
+#vif_factors <-vif(mod0)
+#vif_factors <-vif(optimodel)
+#vif_factors <-vif(fSecondBest)
+#vif_factors <-vif(fThirdBest)
+#vif_factors <-vif(fFourthBest)
+#vif_factors <-vif(bSecondBest)
+#vif_factors <-vif(optimal)
+#vif_factors <-vif(optimal_sqrt)
+vif_factors <-vif(optimal_cleaned)
+vif_factors
+# Visualizing VIF
+barplot(vif_factors, col = "red", main = "Variance Inflation Factor", las=2,cex.names=0.8)
+```
+
+```{r}
+# Since VIF > 10 for one covariate, most covariates have 4 < VIF < 10, there is sign of some multicollinearity
+# so, we will try ridge regression as well
+
+
+# Prepare the data
+x <- model.matrix(Appearances ~ Wins + Fouls + Interceptions + Blocked.shots + 
+                  Offsides + Crosses + Clearances + Goals + Hit.woodwork, data = eplPos_cleaned)[,-1]
+y <- eplPos_cleaned$Appearances
+
+
+# Fit lasso regression model
+lasso_model <- glmnet(x, y, alpha = 0)
+
+# Perform cross-validation to find the best lambda
+cv_lasso <- cv.glmnet(x, y, alpha = 0)
+
+print(cv_lasso)
+```
+
+```{r}
+# Best lambda value
+best_lambda <- cv_ridge$lambda.min
+
+
+
+# Refit the ridge regression model with the optimal lambda
+lasso_model_best <- glmnet(x, y, alpha = 0, lambda = best_lambda)
+
+# View the coefficients of the final model
+coef(lasso_model_best)
+
+```
+
+
+```{r}
+# Set up k-fold cross-validation with 10 folds
+train_control <- trainControl(method = "cv", number = 10)
+
+# Fit the model using k-fold cross-validation
+cv_model <- train(Appearances ~ Wins + Fouls + Interceptions + Blocked.shots + 
+                  Offsides + Crosses + Clearances + Goals + Hit.woodwork, 
+                  data = eplPos_cleaned, 
+                  method = "lm", 
+                  trControl = train_control)
+
+# Print the results
+print(cv_model)
+```
+```{r}
+summary(optimal_cleaned)
+```
+
+```{r}
+# Predictions from the original linear regression model
+predictions_optimal <- predict(optimal_cleaned, newdata = eplPos_cleaned)
+
+# Predictions from the ridge regression model
+predictions_lasso <- predict(lasso_model_best, s = best_lambda, newx = x)
+```
+
+```{r}
+# Calculate MSE for the original linear regression model
+mse_optimal <- mean((predictions_optimal - eplPos_cleaned$Appearances)^2)
+
+# Calculate MSE for the lasso regression model
+mse_lasso <- mean((predictions_lasso - y)^2)
+
+# Print MSEs
+cat("MSE for Original Model: ", mse_optimal, "\n")
+cat("MSE for Lasso Regression Model: ", mse_lasso, "\n")
+
+
+# Calculate R-squared for the original linear regression model
+sst_optimal <- sum((eplPos_cleaned$Appearances - mean(eplPos_cleaned$Appearances))^2)
+sse_optimal <- sum((predictions_optimal - eplPos_cleaned$Appearances)^2)
+r_squared_optimal <- 1 - sse_optimal/sst_optimal
+
+
+# Calculate R-squared for the lasso regression model
+sst_lasso <- sum((y - mean(y))^2)
+sse_lasso <- sum((predictions_lasso - y)^2)
+r_squared_lasso <- 1 - sse_lasso/sst_lasso
+
+# Calculate the number of observations and predictors for the original model
+n_optimal <- nrow(eplPos_cleaned)
+p_optimal <- length(coef(optimal_cleaned)) - 1  # Exclude the intercept
+
+# Calculate the number of observations and predictors for the lasso regression model
+n_lasso <- length(y)
+p_lasso <- length(coef(lasso_model)) - 1  # Exclude the intercept (assuming lasso_model is the lasso regression object)
+
+
+# Print R-squared and Adjusted R-squared values
+cat("R-squared for Original Model: ", r_squared_optimal, "\n")
+cat("R-squared for Lasso Regression Model: ", r_squared_lasso, "\n")
+```
